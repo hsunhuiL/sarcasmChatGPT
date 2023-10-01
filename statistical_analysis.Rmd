@@ -1,0 +1,307 @@
+---
+title: "Thesis analysis"
+output: html_notebook
+---
+
+```{r libraries, message=FALSE}
+library(lme4)
+library(tidyverse)
+library(car)
+library(sjPlot)
+library(ggplot2)
+```
+
+Loading datasets
+
+```{r load_data}
+df <- read.csv('Dataset.csv')
+df_all <- read.csv('df_all.csv')  #contains all text features
+```
+
+```{r}
+df <- df %>%
+  mutate(delta = sarcasm - sarc_chat)
+
+df_prompt <- dplyr::select(df, 
+                           c(trial_id, sarcasm, sarc_chat, delta,
+                             comp_p, WC_p, read_p, Brysbaert_P,
+                             Familiarity_P, Imageability_P, Meaningfulness_P))
+
+df_response <- dplyr::select(df, 
+                             c(trial_id, sarcasm, delta, sarc_chat,
+                               comp_r, WC_r, read_r, Brysbaert_R, 
+                               Familiarity_R, Imageability_R, Meaningfulness_R))
+```
+
+```{r prompt_sarc}
+lm_p <- lm(sarcasm ~ comp_p + scale(read_p) + scale(WC_p) + 
+             scale(Brysbaert_P)+scale(Familiarity_P) + scale(Imageability_P)+
+             scale(Meaningfulness_P), data=df_prompt)
+vif(lm_p) #Img(13.269906)
+
+# -Img
+lm_p1 <- lm(sarcasm ~ comp_p + scale(read_p) + scale(WC_p) + 
+             scale(Brysbaert_P)+scale(Familiarity_P) +
+             scale(Meaningfulness_P), data=df_prompt)
+vif(lm_p1) # controlled
+anova(lm_p1, lm_p) # Adding Imageability doesn't affect the model significantly
+
+summary(lm_p1)
+#
+# Meaningfulness in prompts is a negative factor for human sarcsam level.
+# Higher sarcasticness in prompt texts that have less associations. 
+```
+
+```{r response_sarc}
+lm_r <- lm(sarcasm ~ comp_r+ scale(read_r) + scale(WC_r)+
+             scale(Brysbaert_R)+scale(Familiarity_R)+scale(Imageability_R)
+           +scale(Meaningfulness_R), data=df_response)
+summary(lm_r)
+vif(lm_r) #controlled
+
+# Meaningfulness in response: positive 
+# Imageability in responses: negative
+```
+
+```{r both_sarc}
+df_all <- mutate(df_all, 
+                 sarcasm = df$sarcasm, sarc_chat = df$sarc_chat, 
+                 comp_all = df$comp_all, read_all = df$read_all)
+
+lm_all <- lm(sarcasm ~ comp_all + scale(read_all) + scale(WC_all) +
+             scale(Brysbaert_Concreteness)+scale(Familiarity)+ scale(Imageability)+
+              scale(Meaningfulness), data=df_all)
+vif(lm_all) # highest: Img(7.825754)
+
+# -Img
+lm_all1 <- lm(sarcasm ~ comp_all + scale(read_all) + scale(WC_all) +
+             scale(Brysbaert_Concreteness)+scale(Familiarity)+ 
+              scale(Meaningfulness), data=df_all)
+vif(lm_all1) # all lower than 2
+anova(lm_all1, lm_all) # Not significant
+
+summary(lm_all) # Concreteness in all text: positive
+```
+
+```{r prompt_chat}
+chat_p <- lm(sarc_chat ~ comp_p + scale(read_p) + scale(WC_p) +
+               scale(Imageability_P)+ scale(Brysbaert_P)+scale(Familiarity_P)+
+               scale(Meaningfulness_P), data=df_prompt)
+vif(chat_p) # highest: Concrete(5.527905)
+summary(chat_p) # non-significant
+```
+
+```{r response_sarcChat}
+chat_r <- lm(sarc_chat ~ comp_r + scale(read_r) + scale(WC_r)+
+             scale(Brysbaert_R)+scale(Familiarity_R)+scale(Imageability_R)
+           +scale(Meaningfulness_R), data=df_response)
+vif(chat_r) #controlled (<4)
+summary(chat_r)  
+
+# Negative polarity score, higher sarcasm for ChatGPT
+```
+
+```{r both_sarcChat}
+
+chat_all <- lm(sarc_chat ~ comp_all + scale(WC_all) + scale(read_all)+
+             scale(Brysbaert_Concreteness)+scale(Familiarity)+scale(Imageability)+
+            scale(Meaningfulness), data=df_all)
+vif(chat_all) # Img(7.825754)
+summary(chat_all)  #polarity (neg) marginally significant
+
+# -Img
+chat_all1 <- lm(sarc_chat ~ comp_all + scale(WC_all) + scale(read_all)+
+             scale(Brysbaert_Concreteness)+scale(Familiarity)+
+            scale(Meaningfulness), data=df_all)
+vif(chat_all1) #controlled
+anova(chat_all1, chat_all) # not significantly better
+summary(chat_all1) # Lexical polarity: marginally significant
+```
+
+### Delta
+
+```{r delta}
+
+std <- sd(df$delta) # 1.126036
+mean_del <- mean(df$delta) # -1.875e-10
+
+high_delta <- which(df_prompt$delta > (mean_del+std)) # 5 10 12 19 22 30 31
+low_delta <- which(df_prompt$delta < (mean_del-std)) # 3 8 20 28
+
+# Concatenate all extremes data points to one dataframe
+df_del_p <- rbind(df_prompt[high_delta,], df_prompt[low_delta,])
+df_del_p <- mutate(df_del_p, delta_a = abs(delta))
+
+df_del_r <- rbind(df_response[high_delta,], df_response[low_delta,])
+df_del_r <- mutate(df_del_r, delta_a = abs(delta))
+
+df_del_all <- rbind(df_all[high_delta,], df_all[low_delta,])
+df_del_all <- mutate(df_del_all, delta = sarcasm-sarc_chat, delta_a = abs(sarcasm-sarc_chat))
+```
+
+```{r del_prompt}
+
+
+# all
+model_p <- lm(delta_a ~ comp_p + scale(WC_p)+ scale(read_p)+
+                scale(Familiarity_P)+ scale(Brysbaert_P)+ scale(Imageability_P)+
+                scale(Meaningfulness_P), data = df_del_p)
+vif(model_p) #Imageability causes severe collinearity (37.2), Meaningfulness(9.191047)
+
+# -Img
+model_p1 <- lm(delta_a ~ comp_p + scale(WC_p)+ scale(read_p)+
+                scale(Familiarity_P)+ scale(Brysbaert_P)+
+                scale(Meaningfulness_P), data = df_del_p)
+vif(model_p1) # controlled <2
+summary(model_p1) # Prompt's features do not contribute to the mismatch
+```
+
+```{r del_response}
+# All features
+model_r <- lm(delta_a ~ comp_r + scale(WC_r)+ scale(read_r) + scale(Brysbaert_R)+
+             scale(Familiarity_R)+ scale(Imageability_R)+
+             scale(Meaningfulness_R), data=df_del_r)
+vif(model_r) # Imageability_R (8.992447), Familiarity(5.498358)
+summary(model_r)
+
+# model1  -Img
+model_r1 <- lm(delta_a ~ comp_r + scale(WC_r)+ scale(read_r) + scale(Brysbaert_R)+
+             scale(Familiarity_R)+ scale(Meaningfulness_R), data=df_del_r)
+vif(model_r1) # controlled
+summary(model_r1)
+
+anova(model_r, model_r1)  # not significant
+
+# Response's Concreteness is a negative factor: less concrete, bigger the mismatch
+# Familiarity is a positive factor: more common words, bigger the mismatch
+```
+
+```{r del_combined}
+
+model_all <- lm(delta_a ~ scale(comp_all) + scale(WC_all) + scale(read_all)+
+                  scale(Familiarity)+ scale(Meaningfulness)+ 
+                  scale(Brysbaert_Concreteness)+scale(Imageability),
+                data = df_del_all)
+vif(model_all) #Imageability(12.177954), Meaningfulness(13.673677), Concreteness(10.437683)
+
+# -Img
+model_all1 <- lm(delta_a ~ scale(comp_all) + scale(WC_all) + scale(read_all)
+                +scale(Familiarity)+ scale(Brysbaert_Concreteness)+ 
+                  scale(Meaningfulness), data = df_del_all)
+vif(model_all1) # Conc(7.463156), Meaning(9.911461)
+
+anova(model_all, model_all1) #significant (drop Img)
+
+# -Meaning
+model_all2 <- lm(delta_a ~ scale(comp_all) + scale(WC_all) + scale(read_all)
+                +scale(Familiarity)+ scale(Brysbaert_Concreteness),
+                data = df_del_all)
+vif(model_all2) # controlled <2
+summary(model_all2)
+
+anova(model_all1, model_all2) # Not significant
+
+#
+# model_all1 (-Img,-Meaning) vs. model_all2 (-Meaning) 
+#
+# Concreteness: negative factor for the mismatch degree - bigger mismatch in less concrete texts.
+# Familiarity: positive
+#
+```
+
+### Inspecting interaction effect
+
+```{r}
+# prompts vs. response
+# renaming columns for row-binding
+
+df_prompt %>% mutate(trial_id = "prompt") %>%
+  rename("type" = "trial_id",
+         "polarity" = "comp_p", "WC" = "WC_p", "readability" = "read_p",
+         "concrete" = "Brysbaert_P", "familiar" = "Familiarity_P", 
+         "image" = "Imageability_P", "meaning" = "Meaningfulness_P") -> df_prompt
+
+df_response %>% mutate(trial_id = "response") %>%
+  rename("type" = "trial_id",
+         "polarity" = "comp_r", "WC" = "WC_r", "readability" = "read_r",
+         "concrete" = "Brysbaert_R", "familiar" = "Familiarity_R", 
+         "image" = "Imageability_R", "meaning" = "Meaningfulness_R") -> df_response
+
+```
+
+```{r}
+binded <- rbind(df_prompt, df_response)
+```
+
+```{r}
+lm_binded <- lm(sarcasm ~ type*scale(meaning)+type*scale(familiar)+
+                  type*scale(concrete)+ scale(image)+ type*scale(polarity)+
+                   scale(readability)+ type*scale(WC), data=binded)
+vif(lm_binded)
+summary(lm_binded) 
+
+#significant interaction - type:concrete
+```
+
+```{r}
+plot_model(lm_binded, type='pred', terms=c('concrete','type')) +
+  theme_minimal()
+
+# different effect for concreteness in response or prompt
+```
+
+```{r}
+# interaction in predicting chatgpt rating (response vs prompt)
+
+lm_binded2 <- lm(sarc_chat ~ type*scale(meaning)+type*scale(familiar)+
+                  type*scale(concrete)+ scale(image)+ type*scale(polarity)+
+                   type*scale(readability)+ type*scale(WC), data=binded)
+vif(lm_binded2)
+summary(lm_binded2)
+```
+
+Humans vs. ChatGPT rating
+
+```{r}
+df_chat_p <- dplyr::select(df_prompt, 
+                           c(type, sarc_chat, polarity, WC, readability, concrete, meaning, familiar, image))
+df_chat_p <- mutate(df_chat_p, type="chatpgt")
+df_chat_r <- dplyr::select(df_response, 
+                           c(type, sarc_chat, polarity, WC, readability, concrete, meaning, familiar, image))
+df_chat_r <- mutate(df_chat_r, type="chatpgt")
+```
+
+```{r}
+# creating merged dataframe for prompt and response features
+
+df_p <- subset(df_prompt, select=-c(sarc_chat, delta))
+df_p <- mutate(df_p, type="human")
+df_chat_p <- rename(df_chat_p, "sarcasm" = "sarc_chat")
+df_p2<- rbind(df_p, df_chat_p)
+
+df_r <- subset(df_response, select=-c(sarc_chat, delta))
+df_r <- mutate(df_r, type="human")
+df_chat_r <- rename(df_chat_r, "sarcasm" = "sarc_chat")
+df_r2<- rbind(df_r, df_chat_r)
+```
+
+```{r}
+lm_p2 <- lm(sarcasm ~ type*scale(meaning) + type*polarity + type*scale(WC) + type*scale(readability)
+            + type*scale(familiar) + type*scale(concrete), data=df_p2)
+
+vif(lm_p2) # high vif with image - drop!
+summary(lm_p2) # no interaction effect between rater type and prompt features
+```
+
+```{r}
+lm_r2 <- lm(sarcasm ~ type*scale(meaning) + type*polarity + type*scale(WC) + type*scale(readability)
+            + type*scale(familiar) + type*scale(concrete) + type*scale(image), data=df_r2)
+vif(lm_r2)  # controlled (<8)
+
+summary(lm_r2) # type:polarity
+```
+
+```{r}
+plot_model(lm_r2, type='pred', terms=c('polarity','type'))+
+  theme_minimal()
+```
